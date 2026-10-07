@@ -1,0 +1,10 @@
+cloudsim-plus=8.0.0
+source_rows=45000
+required_unique_rows=45000
+workload_sizes=1000,2000,3000,4000,5000
+repeats_per_size=3
+algorithms=SMA,AO
+objective_weights=time:0.60,cost:0.40
+population=8
+iterations=12
+topology=2 datacenters; 2 hosts per datacenter; 2 VMs per host
