@@ -171,10 +171,15 @@ public final class MetaheuristicSchedulingSimulation {
         for (int p = 0; p < POPULATION_SIZE; p++) { int[] candidate = new int[tasks.size()]; for (int i = 0; i < candidate.length; i++) candidate[i] = random.nextInt(vms.size()); population.add(repair(tasks,vms,candidate)); }
         for (int iteration = 0; iteration < ITERATIONS; iteration++) {
             population.sort(Comparator.comparingDouble(c -> score(tasks,vms,c,scaleTime,scaleCost)));
+            double bestFitness = score(tasks,vms,population.get(0),scaleTime,scaleCost);
+            double worstFitness = score(tasks,vms,population.get(population.size() - 1),scaleTime,scaleCost);
             int[] best = population.get(0).clone(); List<int[]> next = new ArrayList<>(); next.add(best);
             for (int p = 1; p < POPULATION_SIZE; p++) {
                 int[] candidate = population.get(p).clone();
-                if (algorithm.equals("SMA")) updateSma(candidate,best,iteration,random,vms.size()); else updateAo(candidate,best,iteration,random,vms.size());
+                if (algorithm.equals("SMA")) {
+                    double currentFitness = score(tasks,vms,candidate,scaleTime,scaleCost);
+                    updateSma(candidate,best,iteration,p,currentFitness,bestFitness,worstFitness,random,vms.size());
+                } else updateAo(candidate,best,population,iteration,random,vms.size());
                 next.add(repair(tasks,vms,candidate));
             }
             population = next;
@@ -182,14 +187,83 @@ public final class MetaheuristicSchedulingSimulation {
         return population.stream().min(Comparator.comparingDouble(c -> score(tasks,vms,c,scaleTime,scaleCost))).orElseThrow();
     }
 
-    private static void updateSma(int[] candidate,int[] best,int iteration,Random random,int vmCount) {
-        double progress = (double)iteration / ITERATIONS;
-        for (int i = 0; i < candidate.length; i++) { if (random.nextDouble() < 0.55 * (1 - progress) || random.nextDouble() < 0.10) candidate[i] = best[i]; else if (random.nextDouble() < 0.15) candidate[i] = random.nextInt(vmCount); }
+    private static void updateSma(int[] candidate,int[] best,int iteration,int rank,
+                                 double currentFitness,double bestFitness,double worstFitness,
+                                 Random random,int vmCount) {
+        // Discrete form of the SMA position update. The candidate rank controls
+        // the signed weight: better candidates are attracted to the food source,
+        // while weaker candidates retain more exploratory movement.
+        double progress = (double) iteration / Math.max(1, ITERATIONS - 1);
+        double fitnessRange = Math.max(1e-12, worstFitness - bestFitness);
+        double relativeFitness = Math.max(0, Math.min(1, (currentFitness - bestFitness) / fitnessRange));
+        double magnitude = 1.0 + random.nextDouble() * Math.log10(1.0 + relativeFitness * 9.0);
+        double weight = rank < POPULATION_SIZE / 2 ? magnitude : -magnitude;
+        double attraction = Math.max(0.05, Math.min(0.90, Math.abs(weight) * (1.0 - 0.65 * progress)));
+        double z = 0.03 + 0.07 * progress;
+
+        for (int i = 0; i < candidate.length; i++) {
+            double r = random.nextDouble();
+            if (r < z) {
+                // Random exploration.
+                candidate[i] = random.nextInt(vmCount);
+            } else if (r < z + attraction) {
+                // Move toward the best food source.
+                candidate[i] = best[i];
+            } else if (r < z + attraction + 0.20) {
+                // Contract or make a small local adjustment.
+                if (random.nextBoolean()) candidate[i] = best[i];
+            }
+            // Otherwise the position remains unchanged.
+        }
     }
 
-    private static void updateAo(int[] candidate,int[] best,int iteration,Random random,int vmCount) {
-        double exploration = 1.0 - (double)iteration / ITERATIONS;
-        for (int i = 0; i < candidate.length; i++) { if (random.nextDouble() < 0.35 + 0.45 * exploration) candidate[i] = best[i]; else if (random.nextDouble() < 0.20) candidate[i] = random.nextInt(vmCount); }
+    private static void updateAo(int[] candidate,int[] best,List<int[]> population,
+                                int iteration,Random random,int vmCount) {
+        // Discrete AO adaptation. The first two strategies explore broadly for
+        // the first two thirds of the search, then the last two strategies
+        // refine assignments around the current best solution.
+        int[] meanPosition = meanPosition(population,vmCount);
+        boolean explorationPhase = iteration < (2.0 / 3.0) * ITERATIONS;
+        double progress = (double) iteration / Math.max(1, ITERATIONS - 1);
+
+        for (int i = 0; i < candidate.length; i++) {
+            double rand = random.nextDouble();
+            if (explorationPhase && rand <= 0.5) {
+                // Strategy 1: high-soaring exploration. Compare the current
+                // position with the mean position of the whole population.
+                candidate[i] = random.nextBoolean() ? meanPosition[i] : random.nextInt(vmCount);
+            } else if (explorationPhase) {
+                // Strategy 2: contour flight. Move toward a potential target
+                // between the population mean and the best known assignment.
+                int target = meanPosition[i] + (int) Math.round(
+                    random.nextDouble() * (best[i] - meanPosition[i]));
+                candidate[i] = clampVm(target,vmCount);
+            } else if (rand <= 0.5) {
+                // Strategy 3: low-flight exploitation. Search around Xbest
+                // with a neighborhood that shrinks as iterations progress.
+                int radius = Math.max(1,(int) Math.ceil((1.0 - progress) * vmCount / 3.0));
+                candidate[i] = clampVm(best[i] + random.nextInt(2 * radius + 1) - radius,vmCount);
+            } else {
+                // Strategy 4: walk-and-grab exploitation. Apply a small local
+                // shift around Xbest, including the option to keep Xbest.
+                int shift = random.nextInt(3) - 1;
+                candidate[i] = clampVm(best[i] + shift,vmCount);
+            }
+        }
+    }
+
+    private static int[] meanPosition(List<int[]> population,int vmCount) {
+        int length = population.get(0).length; int[] mean = new int[length];
+        for (int i = 0; i < length; i++) {
+            double total = 0;
+            for (int[] candidate : population) total += candidate[i];
+            mean[i] = clampVm((int) Math.round(total / population.size()),vmCount);
+        }
+        return mean;
+    }
+
+    private static int clampVm(int id,int vmCount) {
+        return Math.max(0,Math.min(vmCount - 1,id));
     }
 
     private static int[] repair(List<Task> tasks,List<VmSpec> vms,int[] candidate) {
