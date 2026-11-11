@@ -108,6 +108,9 @@ Seluruh 45.000 baris data dipakai secara berurutan tanpa tumpang tindih, sehingg
 
 Penempatan VM ke host bersifat tetap (`StaticVmAllocationPolicy`). Di dalam setiap VM, core CPU dialokasikan khusus untuk satu tugas selama tugas tersebut berjalan (`CloudletSchedulerSpaceShared`).
 
+![Arsitektur Topologi Infrastruktur Cloud](artifacts/images/arsitektur-cloud.png)
+*Gambar 1. Topologi infrastruktur cloud yang disimulasikan (2 Datacenter, 4 Host, dan 8 VM).*
+
 ### 2.4 Fungsi Penilaian Solusi
 
 Setiap kandidat solusi (pembagian tugas ke VM) dinilai menggunakan satu nilai gabungan (*fitness*) yang memberi bobot 60% pada waktu penyelesaian dan 40% pada biaya. Nilai yang lebih kecil menunjukkan solusi yang lebih baik.
@@ -130,6 +133,9 @@ Makespan dan biaya dibagi dengan nilai skala agar keduanya berada pada rentang y
 **Mekanisme perbaikan.** Jika suatu solusi menempatkan tugas pada VM yang tidak mencukupi (jumlah core atau RAM kurang dari kebutuhan tugas), tugas tersebut dipindahkan secara otomatis ke VM termurah yang masih memenuhi syarat.
 
 ### 2.6 Cara Kerja Singkat Kedua Algoritma
+
+![Alur Optimasi Metaheuristik dan Simulasi CloudSim Plus](artifacts/images/flowchart-simulasi.png)
+*Gambar 2. Diagram alir proses optimasi metaheuristik dan eksekusi simulasi di CloudSim Plus.*
 
 **SMA**
 
